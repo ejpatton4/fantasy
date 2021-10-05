@@ -12,12 +12,22 @@ rosters_records_points <- fromJSON("https://api.sleeper.app/v1/league/7260769914
 user_ids <- user_ids %>%
   select(user_id,display_name)
 
+str(matchups)
 
-matchups <- fromJSON("https://api.sleeper.app/v1/league/726076991400394752/matchups/4",flatten = TRUE)
+matchups <- fromJSON("https://api.sleeper.app/v1/league/726076991400394752/matchups/3",flatten = TRUE)
+
+matchups$points <- sum(matchups$starters_points) 
+
+sum(matchups$starters_points[[2]])
+
+
+
+
+
 
 
 matchups <- matchups %>%
-  select(roster_id,points,matchup_id)
+  mutate(Point2 = sum(starters_points))
 
 match2 <- matchups %>%
   filter(matchup_id == 1) %>%
@@ -37,7 +47,7 @@ match_func <- function(weeks) {
     matchups <- fromJSON(paste0("https://api.sleeper.app/v1/league/726076991400394752/matchups/",weeks[i]),flatten = TRUE)
     
     matchups <- matchups %>%
-      select(roster_id,points,matchup_id)
+      select(roster_id,points,matchup_id,starters_points)
       
       
     week <- weeks[i]
@@ -50,8 +60,8 @@ match_func <- function(weeks) {
       mid <- df[1,3]
       tm1 <- df[1,1]
       tm2 <- df[2,1]
-      point1 <- df[1,2]
-      point2 <- df[2,2]
+      point1 <- sum(df$starters_points[[1]])
+      point2 <- sum(df$starters_points[[2]])
       
       row_info <- tibble(week,mid,tm1,point1,tm2,point2)
       
