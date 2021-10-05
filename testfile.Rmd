@@ -1,0 +1,285 @@
+---
+title: "Advanced Standings"
+author: "Evan Patton"
+date: "10/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE, warning = FALSE, error = FALSE )
+```
+
+```{r current, echo=FALSE, include = FALSE}
+current <- 4
+
+
+library(tidyverse)
+library(jsonlite)
+library(httr)
+library(knitr)
+library(DT)
+```
+
+
+```{r main function, echo =FALSE, include = FALSE}
+
+match_func <- function(weeks) {
+  
+  for(i in 1:length(weeks)){
+    
+    matchups <- fromJSON(paste0("https://api.sleeper.app/v1/league/726076991400394752/matchups/",weeks[i]),flatten = TRUE)
+    
+    matchups <- matchups %>%
+      select(roster_id,points,matchup_id)
+    
+    
+    week <- weeks[i]
+    
+    for(a in 1:6){
+      
+      df <- matchups %>%
+        filter(matchup_id == a)
+      
+      mid <- df[1,3]
+      tm1 <- df[1,1]
+      tm2 <- df[2,1]
+      point1 <- df[1,2]
+      point2 <- df[2,2]
+      
+      row_info <- tibble(week,mid,tm1,point1,tm2,point2)
+      
+      if(a == 1){
+        weekdf <- row_info
+      }else{
+        weekdf <- rbind(weekdf,row_info)
+      }
+    }
+    
+    if(i == 1){
+      final <- weekdf
+    }else{
+      
+      final <- rbind(final,weekdf)
+    }
+  }
+  final <- final %>%
+    mutate(win_team1 = if_else(point1 > point2, 1,0),
+           win_team2 = if_else(point2 > point1, 1 , 0),
+           win_point = if_else(point1 > point2, point1,point2),
+           lose_point = if_else(point1 > point2, point2,point1))
+  
+  return(final)
+  
+}
+```
+
+
+
+```{r avg, echo=FALSE, include = FALSE}
+
+avg_tbl <- match_func(1:current)
+
+for(i in 1:current){
+  avg_tbl2 <- avg_tbl %>%
+    filter(week == i)
+  
+  scores <- c(avg_tbl2$point1,avg_tbl2$point2)
+  
+  week = i
+  
+  med <- median(scores)
+  
+  
+  row_info <- c(week,scores,med)
+  
+  
+  if(i == 1){
+    red <- row_info
+  }else{
+    red <- rbind(red,row_info)
+  }
+  
+}
+
+red <- as.data.frame(red)
+
+
+names(red) <- c("Week","Score1","Score2","Score3","Score4","Score5","Score6","Score7","Score8","Score9","Score10","Score11","Score12","Median")
+
+
+med_score <- red %>%
+  select(Week,Median)
+
+
+all_matchups <- match_func(1:current)
+
+all_matchups_med <- left_join(all_matchups,med_score, by = c("week" = "Week"))
+
+all_matchups_med <- all_matchups_med %>%
+  mutate(over_med_tm1 = ifelse(point1 > Median,1,0),
+         over_med_tm2 = ifelse(point2 > Median,1,0))
+
+tm1_standings <- all_matchups_med %>%
+  group_by(tm1)%>%
+  summarize(wins   = sum(win_team1),
+            pointsfor = sum(point1),
+            pointsagainst = sum(point2),
+            win_over_med = sum(over_med_tm1))
+
+tm2_standings <- all_matchups_med %>%
+  group_by(tm2)%>%
+  summarize(wins   = sum(win_team2),
+            pointsfor = sum(point2),
+            pointsagainst = sum(point1),
+            win_over_med = sum(over_med_tm2))
+
+final_standings <- full_join(tm1_standings,tm2_standings,by = c("tm1"="tm2"))
+
+final_standings <- final_standings %>%
+  group_by(tm1) %>%
+  summarize(WINS = sum(wins.x,wins.y,na.rm = TRUE),
+            LOSSES = current - WINS,
+            WIN_pct = WINS/(WINS+LOSSES),
+            PF = sum(pointsfor.x,pointsfor.y,na.rm = TRUE),
+            PA = sum(pointsagainst.x,pointsagainst.y,na.rm = TRUE),
+            adj_WIN = sum(win_over_med.x,win_over_med.y,na.rm = TRUE),
+            adj_LOSE =  current - adj_WIN,
+            adj_WIN_pct = adj_WIN / (adj_WIN + adj_LOSE)
+  )
+
+
+for(i in 1:current){
+  
+  weeks <- c(1:current)
+  
+  all_matchs <-  tibble(fromJSON(paste0("https://api.sleeper.app/v1/league/726076991400394752/matchups/",weeks[i])))
+  
+  row.names(all_matchs) <- NULL
+  
+  all_matchs <- all_matchs %>%
+    select(roster_id,points)
+  
+  if(i == 1){
+    df <- (all_matchs)                               
+  } else{
+    row.names(df) <- NULL
+    df <- rbind(df,all_matchs)
+  }
+}
+
+
+team_points <- df %>%
+  group_by(roster_id) %>%
+  summarize(avg_point = mean(points),
+            sd_point = sd(points))
+
+
+final_standings <- left_join(final_standings,team_points, by = c("tm1"="roster_id"))
+
+
+final_standings <- final_standings[,c(1:6,10:11,7:9)]
+
+
+names(final_standings) <- c("Team","Wins","Losses","Win Pct","Points For","Points Against","Avg Points","Std. Dev. Points","Expected Wins","Expected Losses","Expected Win Pct")
+
+final_standings <- final_standings %>%
+  arrange(-`Win Pct`,-`Points For`)
+
+
+
+
+roster_ids_user_id <- fromJSON("https://api.sleeper.app/v1/league/726076991400394752/rosters",flatten = TRUE)
+
+
+
+owner_ids_tm_names <- fromJSON("https://api.sleeper.app/v1/league/726076991400394752/users",flatten = TRUE)
+
+
+owner_ids_tm_names <- owner_ids_tm_names %>%
+  select(user_id,display_name)
+
+roster_ids_user_id <- roster_ids_user_id %>%
+  select(roster_id,owner_id)
+
+
+display_names_roster_id_owner_ids <- left_join(owner_ids_tm_names, roster_ids_user_id, by = c("user_id" = "owner_id"))
+
+
+final_standings <- left_join(final_standings,display_names_roster_id_owner_ids, by = c("Team" = "roster_id"))
+
+
+final_standings <- final_standings[,c(13,2:11)]
+
+names(final_standings)[1] <- "Team"
+
+final_standings <- final_standings %>%
+  mutate(Luck = `Win Pct`- `Expected Win Pct`)
+
+final_standings$`Avg Points` <- round(final_standings$`Avg Points`,digits = 2)
+
+final_standings$`Std. Dev. Points` <- round(final_standings$`Std. Dev. Points`,digits = 2)
+
+
+```
+
+
+
+Below you will see my "advanced standings".
+
+Description of new columns:  
+*  Std. Dev. Points - You can read about standard deviation [here](https://en.wikipedia.org/wiki/Standard_deviation), but essentially it is a measure of how consistent the team scores. Higher means more volatile, lower means often score close to the teams average.  
+*  Expected Wins/Losses - Very basic but essentially, "How many weeks did you score enough to beat at least 50% of the league."  
+*  Luck - Difference between Win Pct and Expected Win Pct, a positive number means you've won more than you should've, negative number means the opposite.
+
+
+```{r table, echo=FALSE}
+
+datatable(final_standings)
+
+```
+
+
+Luckiest teams - 
+
+```{r lucky, echo = FALSE}
+
+datatable(final_standings %>%
+            filter(Luck == max(Luck)) %>%
+            select(Team,Luck))
+```
+
+Unluckiest Teams - 
+
+```{r unlucky, echo =FALSE}
+datatable(final_standings %>%
+            filter(Luck == min(Luck)) %>%
+            select(Team,Luck))
+```
+
+
+Most Variable - 
+
+```{r variable}
+
+datatable(final_standings %>%
+            filter(`Std. Dev. Points` == max(`Std. Dev. Points`)) %>%
+            select(Team,`Std. Dev. Points`))
+
+```
+
+
+Least Variable - 
+
+```{r least variable}
+
+datatable(final_standings %>%
+            filter(`Std. Dev. Points` == min(`Std. Dev. Points`)) %>%
+            select(Team,`Std. Dev. Points`))
+
+```
+
+
+
+
+
+
